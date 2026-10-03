@@ -9,9 +9,12 @@
 
 import argparse
 import sys
+import numpy as np
 from PCLDataReader import PCLLabels, PCLFeatures, PCLVocab
-from sklearn import MultinomialNB, DummyClassifier
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.dummy import DummyClassifier
 from sklearn.model_selection import cross_val_predict
+from sklearn.feature_extraction import DictVectorizer
 
 
 
@@ -35,7 +38,8 @@ class MyFeatures(PCLFeatures):
     
     def __init__(self, vocab):
         """This is a constructor for the MyFeatures class which init's the vocab"""
-       self.initial_vocab = self.extract_text(vocab)
+        self.initial_vocab = vocab._words
+        self.vectorizer = DictVectorizer()
        
     
     def _extract_features(self, example):
@@ -70,34 +74,65 @@ def do_experiment(args):
     """
     Do the experiment!
     """
-    vocabulary = PCLVocab(args.vocabulary) # first create an instance of the vocab
+    vocabulary = PCLVocab(args.vocabulary, args.vocab_size, args.stop_words) # first create an instance of the vocab
     features = MyFeatures(vocabulary) # then get features out of the vocab
     binary_labels = BinaryLabels() # create an instance of binary & category labels
     category_labels = CategoryLabels()
-    clf = sklearn.MultinomialNB() # create an instance of naive bayes classifier 
-    feature_matrix = features.process(data_file=args.data_file) # process the features we found (yay!)
-    target_matrix = binary_labels.process(data_file=args.data_file) # use the binary labels 
-    
+    clf = MultinomialNB() # create an instance of naive bayes classifier 
+    (feature_matrix, example_ids) = features.process(data_file=args.data_file)# process the features we found (yay!)
+    args.data_file.seek(0)
+    target_matrix = binary_labels.process(label_file=args.data_file) # use the binary labels 
     if args.test_category:
         # If a test category is given, then you'll use all of the examples from that category as test data, keeping only the examples without that category as training data. 
-        test_data = np.where(category_labels.process(data_file=args.data_file) == args.test_category) # test is examples with category
-        train_data = np.where(category_labels.process(data_file=args.data_file) != args.test_category) # train is examples without
-        # get predictions and probabilities for each example in the matching test category
-        clf.fit(feature_matrix[train_data], target_matrix[train_data])
-        predictions = clf.predict(feature_matrix[test_data])
-        probabilities = clf.predict_proba(feature_matrix[test_data])
+        labels = np.asarray(category_labels.process(label_file=args.data_file))
+
+        print("labels:", labels) 
+        
+        print(type(labels), np.shape(labels))
+        # test_data = np.where(labels == args.test_category) # test is examples with category
+        test_cat_numerical = category_labels.labels[args.test_category]
+        test_data = np.where(labels == test_cat_numerical)[0]
+        train_data = np.where(labels != test_cat_numerical)[0]
+
+        print("test_data:", test_data)
+        print("train_data:", train_data)
+       # get predictions and probabilities for each example in the matching test category
+       # get the training and test feature matrices
+        # get the subset of feature matrix that corresponds to the test and train data
+        feature_matrix_filtered = []
+        target_matrix_filtered = []
+        target_matrix_filtered_test = []
+        feature_matrix_filtered_test = []
+        print("feature matrix shape:", feature_matrix.shape)
+        for i in train_data:
+            feature_matrix_filtered.append(feature_matrix[i])
+            target_matrix_filtered.append(target_matrix[i])
+
+        
+        
+        for i in test_data:
+            feature_matrix_filtered_test.append(feature_matrix[i])
+        
+        print("feature matrix filtered shape:", np.shape(feature_matrix_filtered))
+        print("feature matrix filtered test shape:", np.shape(feature_matrix_filtered_test))
+        clf.fit(feature_matrix_filtered, target_matrix_filtered)
+        predictions = clf.predict(feature_matrix_filtered_test)
+        probabilities = clf.predict_proba(feature_matrix_filtered_test)
+      
+        
+        
     elif args.xvalidate:
         # Now, we perform x-fold cross validation on the full data, getting predictions (and probabilities) for every example
         probabilities = cross_val_predict(clf, feature_matrix, target_matrix, cv=args.xvalidate, method='predict_proba')
         predictions = np.argmax(probabilities, axis=1)
     
     # write out one line in args.output_file for each prediction in this format: example_id\spredicted class, true or false\sprobability
-    for i, (example_id, pred, prob) in enumerate(zip(range(len(predictions)), predictions, probabilities)):
+    for i, (pred, prob) in enumerate(zip(predictions, probabilities)):
         true_label = target_matrix[i]
         pred_str = binary_labels[pred]
-        args.output_file.write(f"{example_id}\s{pred_str}\s{prob[pred]}\n")
-        with open(args.output_file, 'a') as f:
-            f.write(f"{example_id}\s{pred_str}\s{prob[pred]}\n")
+        example_id = example_ids[i]
+        # args.output_file.write(f"{example_id} {pred_str} {prob[pred]}\n")
+        args.output_file.write(f"{example_id} {pred_str} {prob[pred]}\n")
         
         
         
@@ -119,6 +154,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     do_experiment(args)
-
-    for fp in (args.output_file, args.training, args.labels, args.vocabulary): fp.close()
+    for fp in (args.output_file, args.vocabulary): fp.close()
+    #for fp in (args.output_file, args.training, args.labels, args.vocabulary): fp.close()
 
