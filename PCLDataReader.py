@@ -125,9 +125,9 @@ class PCLFeatures(ABC):
 
     def extract_text(self, example):
         '''
-        This method converts the example input into a list of individual words,, cleaned up via removing html tags & lowercasing text. It returns this list of words.
+        This method converts the example input into a list of individual words, cleaned up via removing html tags & lowercasing text. It returns this list of words.
         '''
-        return unescape("".join([x for x in example.itertext()]).lower()).split() # itertext() gets all of the text context in example, then we join the list of all texts in example, lowercase, unescape to remove html tags, and split on space
+        return unescape("".join([x for x in example.itertext()])).split() # itertext() gets all of the text context in example, then we join the list of all texts in example, lowercase, unescape to remove html tags, and split on space
     
 
     def process(self, data_file, max_instances=None):

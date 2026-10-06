@@ -41,15 +41,44 @@ class MyFeatures(PCLFeatures):
         self.initial_vocab = vocab._words
         self.vectorizer = DictVectorizer()
        
+    def check_upper(self, words):
+        """Check if any word is entirely uppercase."""
+        for word in words:
+            if word.isupper():
+                return True
+        return False
+
+
     
-    def _extract_features(self, example):
+        
+        
+    def _extract_features(self, example, extra_features=True, bigram=False):
         """This function returns a list of words which are in the input vocabulary. Words NOT in the vocab are then ignored."""
         words = self.extract_text(example) # extract the text from the example and split it into a list of words
-        filtered_words = []
+        words_out = []
+        contains_uppercase = False
+
+        if (extra_features and self.check_upper(words)):
+            contains_uppercase = True
         for word in words: # iterate through the list of words
-            if word in self.initial_vocab: # check if the word is in the vocab
-                filtered_words.append(word) # if it is, add it to the filtered list
-        return filtered_words # return the list of words that are in the vocab 
+            if word.lower() in self.initial_vocab: # check if the word is in the vocab
+                # if (extra_features and word == "n't"):
+                #     words_out.append("not")
+                # else:
+                words_out.append(word.lower()) # if it is, add it to the filtered list
+
+        if bigram:
+            bigrams = list(zip(words_out[:-1], words_out[1:]))
+            words_out = []
+            for bigram in bigrams:
+                words_out.append(" ".join(bigram))
+            
+        if extra_features and contains_uppercase:
+            words_out.append("CONTAINS_UPPERCASE")
+
+        return words_out # return the list of words/bigrams that are in the vocab 
+    
+       
 
 
     def _get_feature_name(self, i):
@@ -81,43 +110,22 @@ def do_experiment(args):
     clf = MultinomialNB() # create an instance of naive bayes classifier 
     (feature_matrix, example_ids) = features.process(data_file=args.data_file)# process the features we found (yay!)
     args.data_file.seek(0)
-    target_matrix = binary_labels.process(label_file=args.data_file) # use the binary labels 
+    target_matrix =np.asarray(binary_labels.process(label_file=args.data_file)) # use the binary labels 
+    
     if args.test_category:
         # If a test category is given, then you'll use all of the examples from that category as test data, keeping only the examples without that category as training data. 
-        labels = np.asarray(category_labels.process(label_file=args.data_file))
-
-        print("labels:", labels) 
-        
-        print(type(labels), np.shape(labels))
-        # test_data = np.where(labels == args.test_category) # test is examples with category
+        args.data_file.seek(0) # error fix thing as suggested in wesbite
+        labels = np.asarray(category_labels.process(label_file=args.data_file))# convert labels to 1d array 
         test_cat_numerical = category_labels.labels[args.test_category]
-        test_data = np.where(labels == test_cat_numerical)[0]
-        train_data = np.where(labels != test_cat_numerical)[0]
+        test_idx = np.where(labels == test_cat_numerical)[0] # check if we are in the tested category (if so, we're test!)
+        train_idx = np.where(labels != test_cat_numerical)[0] # otherwise, we're train!
 
-        print("test_data:", test_data)
-        print("train_data:", train_data)
-       # get predictions and probabilities for each example in the matching test category
-       # get the training and test feature matrices
-        # get the subset of feature matrix that corresponds to the test and train data
-        feature_matrix_filtered = []
-        target_matrix_filtered = []
-        target_matrix_filtered_test = []
-        feature_matrix_filtered_test = []
-        print("feature matrix shape:", feature_matrix.shape)
-        for i in train_data:
-            feature_matrix_filtered.append(feature_matrix[i])
-            target_matrix_filtered.append(target_matrix[i])
-
-        
-        
-        for i in test_data:
-            feature_matrix_filtered_test.append(feature_matrix[i])
-        
-        print("feature matrix filtered shape:", np.shape(feature_matrix_filtered))
-        print("feature matrix filtered test shape:", np.shape(feature_matrix_filtered_test))
-        clf.fit(feature_matrix_filtered, target_matrix_filtered)
-        predictions = clf.predict(feature_matrix_filtered_test)
-        probabilities = clf.predict_proba(feature_matrix_filtered_test)
+        feature_matrix = feature_matrix.tocsr() # convert to csr matrix format for fast row indexing (we saw on the sklearn sparse page that this lets us index rows faster, which is nice for filtering to rwos in train_idx)
+    
+        clf.fit(feature_matrix[train_idx], target_matrix[train_idx]) # filter out the test category from the training data and run the fitter on it
+        predictions = clf.predict(feature_matrix[test_idx])
+        probabilities = clf.predict_proba(feature_matrix[test_idx])
+        output_indices = test_idx
       
         
         
